@@ -6,6 +6,16 @@ import sys
 
 
 def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # re-exec as an IPython kernel; used by the bundled kernelspec
+    if argv and argv[0] == "--kernel-launcher":
+        from ipykernel.kernelapp import launch_new_instance
+
+        sys.argv = [sys.argv[0]] + argv[1:]
+        launch_new_instance()
+        return 0
+
     parser = argparse.ArgumentParser(
         prog="jnvim",
         description="Edit and run Jupyter notebooks in the terminal with vim motions.",
@@ -23,14 +33,16 @@ def main(argv=None) -> int:
         return 0
 
     if args.list_kernels:
-        from .kernel import list_kernels
+        from .kernel import install_bundled_kernelspec, list_kernels, resolve_kernel
 
+        install_bundled_kernelspec()
         specs = list_kernels()
         if not specs:
             print("no kernels found (is jupyter_client installed?)", file=sys.stderr)
             return 1
+        chosen = resolve_kernel(args.kernel or "python3")
         for name, display in sorted(specs.items()):
-            print("%-24s %s" % (name, display))
+            print("%s %-24s %s" % ("*" if name == chosen else " ", name, display))
         return 0
 
     if os.name == "nt":

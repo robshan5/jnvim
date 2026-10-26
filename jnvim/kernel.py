@@ -6,10 +6,94 @@ loop drains that queue, so the UI never blocks on the kernel.
 
 from __future__ import annotations
 
+import json
+import os
 import queue
+import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 from typing import Any, Dict, List, Optional, Tuple
+
+BUNDLED_NAME = "jnvim-python"
+
+
+def frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def child_env() -> Dict[str, str]:
+    """Environment for kernel subprocesses.
+
+    A PyInstaller bootloader prepends its extraction dir to LD_LIBRARY_PATH and
+    exports its own _PYI/_MEIPASS2 handles; children must not inherit either.
+    """
+    env = dict(os.environ)
+    if frozen():
+        orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
+        if orig:
+            env["LD_LIBRARY_PATH"] = orig
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+        for key in [k for k in env if k.startswith("_PYI") or k == "_MEIPASS2"]:
+            env.pop(key, None)
+    return env
+
+
+def install_bundled_kernelspec() -> Optional[str]:
+    """Expose this executable as a kernel so a frozen build needs no system python."""
+    try:
+        import ipykernel  # noqa: F401
+    except ImportError:
+        return None
+    if frozen():
+        argv = [sys.executable, "--kernel-launcher", "-f", "{connection_file}"]
+    else:
+        argv = [sys.executable, "-m", "jnvim", "--kernel-launcher", "-f", "{connection_file}"]
+    root = os.path.join(tempfile.gettempdir(), "jnvim-kernelspec-%d" % os.getuid())
+    folder = os.path.join(root, "kernels", BUNDLED_NAME)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "kernel.json"), "w", encoding="utf-8") as fh:
+            json.dump({
+                "argv": argv,
+                "display_name": "Python (jnvim bundled)",
+                "language": "python",
+            }, fh)
+    except OSError:
+        return None
+    existing = os.environ.get("JUPYTER_PATH", "")
+    if root not in existing.split(os.pathsep):
+        os.environ["JUPYTER_PATH"] = os.pathsep.join([root, existing]) if existing else root
+    return BUNDLED_NAME
+
+
+def resolve_kernel(name: str) -> str:
+    """Fall back to the bundled kernel when the requested one cannot be launched."""
+    if spec_runnable(name):
+        return name
+    return install_bundled_kernelspec() or name
+
+
+def spec_runnable(name: str) -> bool:
+    """A frozen build carries kernelspecs that point at the build machine's python."""
+    try:
+        from jupyter_client.kernelspec import KernelSpecManager
+
+        spec = KernelSpecManager().get_kernel_spec(name)
+    except Exception:
+        return False
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle and (spec.resource_dir or "").startswith(bundle) and name != BUNDLED_NAME:
+        return False
+    argv = spec.argv or []
+    if not argv:
+        return False
+    exe = argv[0]
+    if os.path.dirname(exe):
+        return os.path.exists(exe)
+    return shutil.which(exe) is not None
 
 
 class Kernel:
@@ -37,19 +121,21 @@ class Kernel:
 
     def _start(self) -> None:
         try:
-            from jupyter_client.manager import KernelManager
-
-            km = KernelManager(kernel_name=self.name)
-            # the kernel inherits our tty otherwise and scribbles over the UI
-            km.start_kernel(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            kc = km.client()
-            kc.start_channels()
-            kc.wait_for_ready(timeout=60)
+            km, kc = self._launch(resolve_kernel(self.name))
         except Exception as exc:  # noqa: BLE001 - surfaced in the status line
-            self.state = "dead"
-            self.error = "%s: %s" % (type(exc).__name__, exc)
-            self.events.put(("kernel-error", self.error))
-            return
+            fallback = install_bundled_kernelspec()
+            if fallback is None or fallback == self.name:
+                self.state = "dead"
+                self.error = "%s: %s" % (type(exc).__name__, exc)
+                self.events.put(("kernel-error", self.error))
+                return
+            try:
+                km, kc = self._launch(fallback)
+            except Exception as exc2:  # noqa: BLE001
+                self.state = "dead"
+                self.error = "%s: %s" % (type(exc2).__name__, exc2)
+                self.events.put(("kernel-error", self.error))
+                return
         with self._lock:
             self.km, self.kc = km, kc
             self.state = "idle"
@@ -60,6 +146,18 @@ class Kernel:
             thread.start()
             self._threads.append(thread)
         self.events.put(("kernel-ready", self.name))
+
+    def _launch(self, name: str):
+        from jupyter_client.manager import KernelManager
+
+        self.name = name
+        km = KernelManager(kernel_name=name)
+        # the kernel inherits our tty otherwise and scribbles over the UI
+        km.start_kernel(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=child_env())
+        kc = km.client()
+        kc.start_channels()
+        kc.wait_for_ready(timeout=60)
+        return km, kc
 
     def _pump(self, channel: str) -> None:
         get = self.kc.get_iopub_msg if channel == "iopub" else self.kc.get_shell_msg

@@ -6,6 +6,7 @@ import copy
 import curses
 import os
 import re
+import sys
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -966,5 +967,25 @@ def _main(stdscr, path, kernel_name):
     return app
 
 
+def _prepare_terminfo() -> None:
+    """A frozen ncurses only searches its build host's terminfo path."""
+    if not getattr(sys, "frozen", False):
+        return
+    dirs = [d for d in ("/usr/share/terminfo", "/lib/terminfo", "/etc/terminfo",
+                        "/usr/lib/terminfo", "/usr/share/lib/terminfo") if os.path.isdir(d)]
+    bundled = os.path.join(getattr(sys, "_MEIPASS", ""), "terminfo")
+    if os.path.isdir(bundled):
+        dirs.append(bundled)
+    current = os.environ.get("TERMINFO_DIRS")
+    if current:
+        dirs = current.split(":") + dirs
+    if dirs:
+        os.environ["TERMINFO_DIRS"] = ":".join(dict.fromkeys(dirs))
+
+
 def start(path: Optional[str], kernel_name: Optional[str]) -> None:
-    curses.wrapper(_main, path, kernel_name)
+    _prepare_terminfo()
+    try:
+        curses.wrapper(_main, path, kernel_name)
+    except curses.error as exc:
+        raise SystemExit("terminal error: %s (TERM=%s)" % (exc, os.environ.get("TERM", "")))

@@ -1,7 +1,5 @@
 """End-to-end smoke test: drive the curses UI through a pty (Linux only)."""
 
-from __future__ import annotations
-
 import fcntl
 import json
 import os
@@ -16,6 +14,7 @@ import tty
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = "/tmp/jnvim_smoke.ipynb"
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[()][B0]|\x1b[=><]|\x1b\]\d+;[^\x07]*\x07")
+CMD = os.environ.get("JNVIM_CMD", "").split() or [sys.executable, "-m", "jnvim"]
 
 
 def main() -> int:
@@ -26,7 +25,7 @@ def main() -> int:
     tty.setraw(master)
     env = dict(os.environ, TERM="xterm-256color", PYTHONPATH=ROOT, LINES="40", COLUMNS="110")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "jnvim", OUT],
+        CMD + [OUT],
         stdin=slave, stdout=slave, stderr=slave, env=env,
         cwd=ROOT, start_new_session=True,
     )

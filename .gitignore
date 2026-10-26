@@ -1,7 +1,12 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-build/
 dist/
 .venv/
+.venv-build/
 .ipynb_checkpoints/
+
+# PyInstaller scratch (the scripts in build/ are source)
+build/work/
+build/terminfo/
+build/*.spec

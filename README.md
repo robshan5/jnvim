@@ -19,6 +19,19 @@ Linux / macOS only (it needs the `curses` module). On Windows, run it inside WSL
 
 ## Install
 
+Grab the single-file binary (see *Building a binary* below) and run it:
+
+```sh
+chmod +x jnvim
+./jnvim notebook.ipynb
+```
+
+It is self-contained: no Python, no Jupyter, no pip. If the machine already has
+a Jupyter kernel installed, `jnvim` uses it (so your `numpy`, `pandas`, … are
+available); otherwise it falls back to the Python kernel baked into the binary.
+
+From source instead:
+
 ```sh
 pip install -e .          # pulls in jupyter_client + ipykernel
 jnvim notebook.ipynb
@@ -30,8 +43,9 @@ Or run it straight from the source tree:
 python3 -m jnvim notebook.ipynb
 ```
 
-Useful flags: `-k/--kernel <name>` to pick a kernel, `--list-kernels`.
-The file is created on `:w` if it does not exist yet.
+Useful flags: `-k/--kernel <name>` to pick a kernel, `--list-kernels` (the `*`
+marks the one that would be used). The file is created on `:w` if it does not
+exist yet.
 
 ## Two modes
 
@@ -96,6 +110,31 @@ asks the kernel for completions.
 - Images and other rich mime types are shown as a `[image/png]` placeholder;
   the data is preserved on save.
 
+## Building a binary
+
+```sh
+sh build/build-linux.sh           # -> dist/jnvim  (~18 MB, bundles a kernel)
+JNVIM_SLIM=1 sh build/build-linux.sh   # ~10 MB, needs a kernel on the host
+```
+
+PyInstaller does not bundle glibc, so the binary requires the build host's
+glibc or newer — build on the oldest distro you need to support. The shipped
+build is made on Oracle Linux 7.9 (glibc 2.17, `rh-python38`), which gives a
+binary needing only `GLIBC_2.14`; it was verified on glibc 2.17 and 2.43.
+
+- `build/ol7-bootstrap.sh` installs the Python 3.8 collection on an EL7 host.
+- `build/sync-wsl.ps1` copies the tree into a WSL distro and runs a command there.
+- `build/test-binary.sh` runs the pty tests against `dist/jnvim`, both with the
+  host kernel and with `-k jnvim-python`.
+- `build/test-standalone.sh` hides the build venv to prove the binary works on
+  a machine with no Jupyter at all.
+
+Frozen-build details worth knowing: `debugpy` is excluded (it breaks when
+frozen, and ipykernel then skips its debugger), a small terminfo database is
+bundled because the build host's ncurses only searches its own path, kernel
+subprocesses get a cleaned `LD_LIBRARY_PATH`, and kernelspecs that live inside
+the bundle are ignored because their interpreter path belongs to the build box.
+
 ## Tests
 
 ```sh
@@ -104,4 +143,5 @@ python3 tests/tui_smoke.py    # drives the real UI through a pty
 python3 tests/tui_exec.py     # same, but runs code against a live kernel
 ```
 
+Set `JNVIM_CMD=./dist/jnvim` to point the pty tests at a built binary.
 `tests/setup_wsl_env.sh` creates a throwaway venv with the kernel dependencies.
