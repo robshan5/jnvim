@@ -13,3 +13,6 @@ JNVIM_PYTHON="$PY" nvim --headless --clean -u tests/minimal_init.lua -l tests/sp
 
 echo "--- neovim (notebook + live kernel)"
 JNVIM_PYTHON="$PY" nvim --headless --clean -u tests/minimal_init.lua -l tests/spec.lua
+
+echo "--- neovim (matplotlib figures)"
+JNVIM_PYTHON="$PY" nvim --headless --clean -u tests/minimal_init.lua -l tests/spec_images.lua

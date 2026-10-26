@@ -17,6 +17,13 @@ M.defaults = {
     prefix = "  ",
     show_prompt = true, -- virtual "In [3]  0.42s" next to the cell marker
     running_text = "running...",
+    images = {
+      enabled = true,
+      -- "auto" picks image.nvim or snacks.image if installed, else falls back
+      -- to a text placeholder; "none" never draws
+      backend = "auto",
+      max_height = 20, -- in text rows
+    },
   },
 
   keymaps = {

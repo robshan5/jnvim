@@ -86,6 +86,37 @@ mappings and a kernel without any notebook file behind it.
 
 See `:help jnvim` for the full option list.
 
+## Matplotlib figures
+
+Image outputs are decoded to real PNG files and drawn inline under the cell —
+if something in your setup can actually paint pixels in the terminal. jnvim
+does not reimplement that; it hands the file to an image plugin:
+
+- [image.nvim](https://github.com/3rd/image.nvim) or `snacks.image` (from
+  [snacks.nvim](https://github.com/folke/snacks.nvim)), auto-detected
+- a terminal that supports them: kitty, WezTerm, Ghostty, Konsole, or any
+  sixel-capable terminal
+
+```python
+# %%
+%matplotlib inline
+import matplotlib.pyplot as plt
+plt.plot([0, 1, 4, 9])
+```
+
+Without a backend nothing breaks: the cell shows `[image/png 640x480]` and
+`:Jnvim image-open` opens the figure in your system viewer. The PNG is still
+embedded in the `.ipynb` on save either way, and figures stored in a notebook
+are drawn again when you reopen it.
+
+```lua
+require("jnvim").setup({
+  output = { images = { enabled = true, backend = "auto", max_height = 20 } },
+})
+```
+
+`:checkhealth jnvim` tells you which backend was picked.
+
 ## How it works
 
 ```
@@ -105,10 +136,13 @@ protocol frames to stdout and sends the kernel's own stdout/stderr to
 JNVIM_PYTHON=/path/to/python sh tests/run.sh
 ```
 
-- `tests/test_python.py` — percent round-trips and `.ipynb` reading/writing
+- `tests/test_python.py` — percent round-trips, `.ipynb` reading/writing, image
+  decoding
 - `tests/spec_cells.lua` — cells, commands, keymaps and text objects (no kernel)
 - `tests/spec.lua` — headless Neovim: open a notebook, run cells against a live
   kernel, check the virtual output, save and re-read the file
+- `tests/spec_images.lua` — a real matplotlib figure through the whole pipeline,
+  with a stub image backend asserting what would be drawn and where
 
 `scripts/sync-wsl.ps1` copies the plugin into a WSL distro and runs a command
 there, which is how the suite is run from Windows.

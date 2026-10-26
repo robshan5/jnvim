@@ -7,11 +7,12 @@ CONTENTS                                                      *jnvim-contents*
     2. Requirements .......................... |jnvim-requirements|
     3. Installation .......................... |jnvim-installation|
     4. Buffer format ......................... |jnvim-format|
-    5. Commands .............................. |jnvim-commands|
-    6. Mappings .............................. |jnvim-mappings|
-    7. Configuration ......................... |jnvim-config|
-    8. Lua API ............................... |jnvim-api|
-    9. How it works .......................... |jnvim-internals|
+    5. Images ................................ |jnvim-images|
+    6. Commands .............................. |jnvim-commands|
+    7. Mappings .............................. |jnvim-mappings|
+    8. Configuration ......................... |jnvim-config|
+    9. Lua API ............................... |jnvim-api|
+   10. How it works .......................... |jnvim-internals|
 
 ==============================================================================
 1. INTRODUCTION                                           *jnvim-introduction*
@@ -76,7 +77,48 @@ Percent files that are not notebooks (a plain `.py`) can be used too: see
 |:Jnvim| `attach`.
 
 ==============================================================================
-5. COMMANDS                                                   *jnvim-commands*
+5. IMAGES                                                       *jnvim-images*
+
+matplotlib figures and any other `image/png`, `image/jpeg`, `image/gif`,
+`image/webp` or `image/svg+xml` output are decoded to files in a temporary
+directory and drawn under their cell.
+
+Neovim cannot paint pixels by itself, so jnvim delegates to a terminal image
+plugin and auto-detects: >
+
+    3rd/image.nvim            ("image.nvim")
+    folke/snacks.nvim         ("snacks.image")
+<
+Those need a terminal speaking the kitty graphics protocol or sixel: kitty,
+WezTerm, Ghostty, Konsole, ...
+
+With no backend the cell keeps a `[image/png 640x480]` placeholder and
+`:Jnvim image-open` hands the file to `xdg-open`/`open`/`wslview`. Either way
+the image data stays in the `.ipynb` on save, and figures already stored in a
+notebook are drawn again when it is reopened.
+
+Options (see |jnvim-config|): >lua
+
+    output = {
+      images = {
+        enabled = true,
+        backend = "auto",   -- or "image.nvim", "snacks.image", "none"
+        max_height = 20,    -- text rows
+      },
+    }
+<
+A custom backend can be installed with: >lua
+
+    require("jnvim.image").set_backend({
+      name = "mine",
+      show = function(bufnr, path, row, opts) return handle end,
+      clear = function(handle) end,
+    })
+<
+`:checkhealth jnvim` reports which backend was picked.
+
+==============================================================================
+6. COMMANDS                                                   *jnvim-commands*
 
                                                                       *:Jnvim*
 :Jnvim [subcommand] [args]      Default subcommand is `run`.
@@ -98,6 +140,7 @@ Percent files that are not notebooks (a plain `.py`) can be used too: see
     clear-all           drop every output
     toggle-output       hide/show the output of the current cell
     output-full         open the untruncated output in a split
+    image-open          open this cell's figure in the system viewer
     inspect             kernel documentation for the symbol under the cursor
     cell-below          insert a cell below and start inserting
     cell-above          insert a cell above and start inserting
@@ -106,7 +149,7 @@ Percent files that are not notebooks (a plain `.py`) can be used too: see
     raw                 turn the current cell into a raw cell
 
 ==============================================================================
-6. MAPPINGS                                                   *jnvim-mappings*
+7. MAPPINGS                                                   *jnvim-mappings*
 
 Buffer-local, created for notebook buffers only. `<localleader>` defaults to
 `\` in Neovim; set |maplocalleader| to something comfortable.
@@ -132,7 +175,7 @@ Set `keymaps.enabled = false` to define your own, or set any single entry to
 Completion from the live kernel is available through 'omnifunc' (|i_CTRL-X_CTRL-O|).
 
 ==============================================================================
-7. CONFIGURATION                                                *jnvim-config*
+8. CONFIGURATION                                                *jnvim-config*
 
 Defaults: >lua
 
@@ -148,6 +191,11 @@ Defaults: >lua
         prefix = "  ",
         show_prompt = true,
         running_text = "running...",
+        images = {
+          enabled = true,
+          backend = "auto",
+          max_height = 20,
+        },
       },
 
       keymaps = {
@@ -176,7 +224,7 @@ Highlight groups (all linked by default, override freely):
 `JnvimOutput`, `JnvimError`, `JnvimPrompt`, `JnvimRunning`, `JnvimMore`.
 
 ==============================================================================
-8. LUA API                                                         *jnvim-api*
+9. LUA API                                                         *jnvim-api*
 
 >lua
     local jnvim = require("jnvim")
@@ -193,7 +241,7 @@ Statusline example: >lua
     vim.o.statusline = "%f %= %{v:lua.require'jnvim'.status()}"
 <
 ==============================================================================
-9. HOW IT WORKS                                              *jnvim-internals*
+10. HOW IT WORKS                                             *jnvim-internals*
 
 The Lua side owns the buffer, the cells and the extmarks. A small Python
 process (`python/jnvim`) is started on demand and speaks one JSON object per

@@ -76,6 +76,9 @@ M.subcommands = {
   ["output-full"] = function()
     notebook.show_full(current())
   end,
+  ["image-open"] = function()
+    notebook.open_image(current())
+  end,
   inspect = function()
     notebook.inspect(current())
   end,

@@ -67,6 +67,18 @@ function M.check()
   else
     error_("the python bridge is missing from " .. root .. "/python")
   end
+
+  local images = require("jnvim.image")
+  local impl = images.backend()
+  if impl then
+    ok("images: " .. impl.name)
+  else
+    (health.info or warn)("no image backend: figures show as [image/png WxH] placeholders", {
+      "install 3rd/image.nvim or folke/snacks.nvim (snacks.image)",
+      "needs a terminal with kitty graphics or sixel (kitty, wezterm, ghostty)",
+      "`:Jnvim image-open` opens the figure in an external viewer meanwhile",
+    })
+  end
 end
 
 return M

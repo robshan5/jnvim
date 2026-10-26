@@ -1,5 +1,6 @@
 """Round-trip tests for the percent format and the .ipynb reader/writer."""
 
+import base64
 import json
 import os
 import sys
@@ -77,9 +78,44 @@ with tempfile.TemporaryDirectory() as tmp:
 check("ansi stripped", notebook.output_lines([
     {"output_type": "error", "ename": "ValueError", "evalue": "bad",
      "traceback": ["\x1b[31mValueError\x1b[0m: bad"]}]), [["ValueError: bad", "err"]])
-check("image placeholder", notebook.output_lines([
+check("image placeholder without a cache dir", notebook.output_lines([
     {"output_type": "display_data", "data": {"image/png": "x" * 2048}}]),
-    [["[image/png 2.0 KB]", "out"]])
+    [["[image/png 2.0 KB]", "image"]])
+check("unknown mime", notebook.output_lines([
+    {"output_type": "display_data", "data": {"application/pdf": "x" * 1024}}]),
+    [["[application/pdf 1.0 KB]", "out"]])
+
+# ------------------------------------------------------------------- images
+# a 2x1 red/blue PNG
+PNG = base64.b64encode(base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAEklEQVR4nGP8z4AAT"
+    "AxQxlAVAgCj0QIDaT2vJwAAAABJRU5ErkJggg==")).decode()
+
+with tempfile.TemporaryDirectory() as tmp:
+    lines = notebook.output_lines([
+        {"output_type": "display_data", "data": {"image/png": PNG, "text/plain": "<Figure>"}},
+    ], tmp)
+    check("image then text", [line[1] for line in lines], ["image", "out"])
+    info = lines[0][2]
+    check("size parsed", (info["width"], info["height"]), (2, 1))
+    check("label", lines[0][0], "[image/png 2x1]")
+    check("file written", os.path.exists(info["path"]), True)
+    check("file is a png", open(info["path"], "rb").read(4), b"\x89PNG")
+    check("text kept", lines[1][0], "<Figure>")
+
+    again = notebook.output_lines([
+        {"output_type": "display_data", "data": {"image/png": PNG}}], tmp)
+    check("same bytes reuse the same file", again[0][2]["path"], info["path"])
+    check("one file on disk", len(os.listdir(tmp)), 1)
+
+    svg = notebook.output_lines([
+        {"output_type": "display_data", "data": {"image/svg+xml": "<svg/>"}}], tmp)
+    check("svg saved", svg[0][2]["path"].endswith(".svg"), True)
+
+    check("broken base64 is ignored", notebook.save_image("image/png", "not base64 !!", tmp), None)
+
+check("gif size", notebook.image_size(b"GIF89a\x40\x00\x30\x00rest"), (64, 48))
+check("not an image", notebook.image_size(b"nope"), None)
 
 if FAILED:
     print("FAILED %d check(s):\n" % len(FAILED))

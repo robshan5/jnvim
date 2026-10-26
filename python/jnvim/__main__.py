@@ -13,7 +13,9 @@ stderr for the rest of the process.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
+import tempfile
 import threading
 import traceback
 from typing import Any, Dict, Optional
@@ -29,9 +31,10 @@ BLOCKING = ("kernel.complete", "kernel.inspect")
 
 
 class Session:
-    def __init__(self, sid: str, name: str, emit) -> None:
+    def __init__(self, sid: str, name: str, emit, image_dir: Optional[str] = None) -> None:
         self.sid = sid
         self.emit = emit
+        self.image_dir = image_dir
         self.kernel = Kernel(name)
         self.pending = []
         self.lock = threading.Lock()
@@ -111,7 +114,7 @@ class Session:
             self.emit("output", {
                 "token": token,
                 "output": out,
-                "lines": notebook.output_lines([out]),
+                "lines": notebook.output_lines([out], self.image_dir),
             })
             return
         if channel == "shell" and mtype == "execute_reply":
@@ -128,6 +131,7 @@ class Bridge:
         self.sessions: Dict[str, Session] = {}
         self.lock = threading.Lock()
         self.sessions_lock = threading.Lock()
+        self.image_dir = tempfile.mkdtemp(prefix="jnvim-images-")
 
     # ----------------------------------------------------------------- io
     def send(self, payload: Dict[str, Any]) -> None:
@@ -182,13 +186,15 @@ class Bridge:
         with self.sessions_lock:
             session = self.sessions.get(sid)
             if session is None and create:
-                session = Session(sid, params.get("kernel") or "python3", self.emitter(sid))
+                session = Session(sid, params.get("kernel") or "python3", self.emitter(sid),
+                                  self.image_dir)
                 self.sessions[sid] = session
         return session
 
     # ------------------------------------------------------------- methods
     def do_ping(self, params):
-        return {"version": sys.version.split()[0], "pid": __import__("os").getpid()}
+        return {"version": sys.version.split()[0], "pid": __import__("os").getpid(),
+                "image_dir": self.image_dir}
 
     def do_notebook_read(self, params):
         doc = notebook.read(params["path"])
@@ -205,7 +211,7 @@ class Bridge:
                 "cell_type": cell["cell_type"],
                 "execution_count": cell["execution_count"],
                 "outputs": cell["outputs"],
-                "lines": notebook.output_lines(cell["outputs"]),
+                "lines": notebook.output_lines(cell["outputs"], self.image_dir),
                 "id": cell["id"],
             } for cell in cells],
         }
@@ -301,6 +307,7 @@ class Bridge:
         for session in list(self.sessions.values()):
             session.kernel.shutdown()
         self.sessions.clear()
+        shutil.rmtree(self.image_dir, ignore_errors=True)
         return {"ok": True}
 
 

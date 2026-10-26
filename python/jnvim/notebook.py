@@ -6,14 +6,26 @@ not installed.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import json
 import os
 import re
+import struct
 import uuid
 from typing import Any, Dict, List, Optional
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 CELL_TYPES = ("code", "markdown", "raw")
+
+IMAGE_MIMES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+}
 
 
 def strip_ansi(text: str) -> str:
@@ -113,9 +125,59 @@ def write(path: str, doc: Dict[str, Any]) -> str:
     return path
 
 
-def output_lines(outputs: List[Dict[str, Any]]) -> List[List[str]]:
-    """Flatten nbformat outputs into ``[text, kind]`` pairs for rendering."""
-    lines: List[List[str]] = []
+def image_size(data: bytes) -> Optional[tuple]:
+    """(width, height) for PNG/GIF without pulling in an image library."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
+        return struct.unpack(">II", data[16:24])
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return struct.unpack("<HH", data[6:10])
+    if data[:2] == b"\xff\xd8":  # jpeg: walk the segment headers
+        index = 2
+        while index + 9 < len(data):
+            if data[index] != 0xFF:
+                break
+            marker, length = data[index + 1], struct.unpack(">H", data[index + 2:index + 4])[0]
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                height, width = struct.unpack(">HH", data[index + 5:index + 9])
+                return width, height
+            index += 2 + length
+    return None
+
+
+def save_image(mime: str, payload: str, folder: str) -> Optional[Dict[str, Any]]:
+    """Write one image output to `folder`; returns its path and pixel size."""
+    extension = IMAGE_MIMES.get(mime)
+    if extension is None or not payload:
+        return None
+    if mime == "image/svg+xml":
+        data = payload.encode("utf-8")
+    else:
+        try:
+            data = base64.b64decode(payload, validate=False)
+        except (binascii.Error, ValueError):
+            return None
+    name = hashlib.sha1(data).hexdigest()[:16] + extension
+    path = os.path.join(folder, name)
+    if not os.path.exists(path):
+        os.makedirs(folder, exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+    size = image_size(data)
+    return {
+        "path": path,
+        "mime": mime,
+        "bytes": len(data),
+        "width": size[0] if size else None,
+        "height": size[1] if size else None,
+    }
+
+
+def output_lines(outputs: List[Dict[str, Any]], image_dir: Optional[str] = None) -> List[list]:
+    """Flatten nbformat outputs into ``[text, kind]`` pairs for rendering.
+
+    Image outputs become ``[text, "image", info]`` when `image_dir` is given.
+    """
+    lines: List[list] = []
     for out in outputs or []:
         otype = out.get("output_type")
         kind, text = "out", ""
@@ -124,9 +186,20 @@ def output_lines(outputs: List[Dict[str, Any]]) -> List[List[str]]:
             kind = "err" if out.get("name") == "stderr" else "stream"
         elif otype in ("execute_result", "display_data"):
             data = out.get("data", {}) or {}
+            image = next((mime for mime in data if mime in IMAGE_MIMES), None)
+            if image:
+                info = save_image(image, data[image], image_dir) if image_dir else None
+                size = ("%dx%d" % (info["width"], info["height"])
+                        if info and info["width"] else "%.1f KB" % (len(data[image]) / 1024.0))
+                entry = ["[%s %s]" % (image, size), "image"]
+                if info:
+                    entry.append(info)
+                lines.append(entry)
+                if "text/plain" not in data:
+                    continue
             if "text/plain" in data:
                 text = data["text/plain"]
-            else:
+            elif not image:
                 for mime, payload in data.items():
                     size = len(payload) if isinstance(payload, str) else 0
                     text = "[%s %.1f KB]" % (mime, size / 1024.0)

@@ -51,6 +51,9 @@ function M.detach(bufnr)
   if not st then
     return
   end
+  for _, record in ipairs(st.records) do
+    require("jnvim.image").clear(record)
+  end
   bridge.request("kernel.stop", { session = st.session })
   by_session[st.session] = nil
   states[bufnr] = nil
@@ -128,6 +131,9 @@ function M.load(bufnr, path, done)
     vim.bo[bufnr].modified = false
 
     output.clear(bufnr)
+    for _, record in ipairs(st.records) do
+      require("jnvim.image").clear(record)
+    end
     st.records = {}
     local parsed = cells.list(bufnr)
     for index, cell in ipairs(parsed) do
@@ -311,6 +317,9 @@ end
 
 function M.clear_all(bufnr)
   local st = M.state(bufnr)
+  for _, record in ipairs(st.records) do
+    require("jnvim.image").clear(record)
+  end
   output.clear(bufnr)
   st.records = {}
   vim.bo[bufnr].modified = true
@@ -332,6 +341,15 @@ function M.show_full(bufnr)
   local record = record_for_cell(st, cell, false)
   if record then
     output.show_full(record, "jnvim://output")
+  end
+end
+
+function M.open_image(bufnr)
+  local st = M.state(bufnr)
+  local cell = cells.at(bufnr, vim.api.nvim_win_get_cursor(0)[1])
+  local record = record_for_cell(st, cell, false)
+  if record then
+    require("jnvim.image").open_external(record)
   end
 end
 

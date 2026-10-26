@@ -1,5 +1,6 @@
 -- Cell outputs rendered as virtual lines; nothing is written into the buffer.
 local config = require("jnvim.config")
+local images = require("jnvim.image")
 
 local M = {}
 
@@ -10,6 +11,7 @@ local HL = {
   out = "JnvimOutput",
   stream = "JnvimOutput",
   err = "JnvimError",
+  image = "JnvimPrompt",
 }
 
 function M.setup_highlights()
@@ -27,17 +29,24 @@ end
 
 local function virt_lines(record)
   local opts = config.options.output
+  local drawn = images.available()
   local lines = {}
-  local total = #record.lines
-  local shown = math.min(total, opts.max_lines)
-  for index = 1, shown do
-    local entry = record.lines[index]
-    local text = (entry[1] or ""):gsub("\r", "")
-    table.insert(lines, { { opts.prefix .. text, HL[entry[2]] or HL.out } })
+  local hidden = 0
+  for _, entry in ipairs(record.lines) do
+    -- the image backend draws over its own padding, so skip the placeholder
+    if drawn and entry[2] == "image" and type(entry[3]) == "table" then
+      hidden = hidden + 1
+    elseif #lines < opts.max_lines then
+      local text = (entry[1] or ""):gsub("\r", "")
+      table.insert(lines, { { opts.prefix .. text, HL[entry[2]] or HL.out } })
+    else
+      hidden = hidden + 1
+    end
   end
-  if total > shown then
+  local text_total = #record.lines - (drawn and #images.specs(record) or 0)
+  if text_total > #lines then
     table.insert(lines, {
-      { ("%s... %d more lines (:Jnvim output-full)"):format(opts.prefix, total - shown), "JnvimMore" },
+      { ("%s... %d more lines (:Jnvim output-full)"):format(opts.prefix, text_total - #lines), "JnvimMore" },
     })
   end
   return lines
@@ -91,14 +100,20 @@ function M.render(bufnr, record, rows)
   out_row = out_row or record.out_row
   if out_row then
     record.out_row = out_row
-    if enabled and #record.lines > 0 then
+    local text_lines = virt_lines(record)
+    if enabled and #text_lines > 0 then
       record.out_mark = set_mark(bufnr, M.ns, record.out_mark, out_row, {
-        virt_lines = virt_lines(record),
+        virt_lines = text_lines,
         virt_lines_above = false,
       })
     elseif record.out_mark then
       pcall(vim.api.nvim_buf_del_extmark, bufnr, M.ns, record.out_mark)
       record.out_mark = nil
+    end
+    if enabled then
+      images.sync(bufnr, record, out_row)
+    else
+      images.clear(record)
     end
   end
 
@@ -141,6 +156,7 @@ function M.row_of(bufnr, record)
 end
 
 function M.erase(bufnr, record)
+  images.clear(record)
   if record.out_mark then
     pcall(vim.api.nvim_buf_del_extmark, bufnr, M.ns, record.out_mark)
   end
@@ -160,7 +176,11 @@ end
 function M.show_full(record, title)
   local lines = {}
   for _, entry in ipairs(record.lines) do
-    table.insert(lines, entry[1])
+    if entry[2] == "image" and type(entry[3]) == "table" then
+      table.insert(lines, ("%s %s"):format(entry[1], entry[3].path))
+    else
+      table.insert(lines, entry[1])
+    end
   end
   if #lines == 0 then
     vim.notify("[jnvim] no output for this cell", vim.log.levels.INFO)
