@@ -1,0 +1,206 @@
+*jnvim.txt*  Run Jupyter notebooks inside Neovim            *jnvim* *jnvim.nvim*
+
+==============================================================================
+CONTENTS                                                      *jnvim-contents*
+
+    1. Introduction .......................... |jnvim-introduction|
+    2. Requirements .......................... |jnvim-requirements|
+    3. Installation .......................... |jnvim-installation|
+    4. Buffer format ......................... |jnvim-format|
+    5. Commands .............................. |jnvim-commands|
+    6. Mappings .............................. |jnvim-mappings|
+    7. Configuration ......................... |jnvim-config|
+    8. Lua API ............................... |jnvim-api|
+    9. How it works .......................... |jnvim-internals|
+
+==============================================================================
+1. INTRODUCTION                                           *jnvim-introduction*
+
+jnvim opens `.ipynb` files as ordinary buffers in jupytext "percent" format,
+runs their cells against a real Jupyter kernel, and shows the output as
+virtual text under each cell. Editing is plain Neovim: every motion, operator,
+plugin and colour scheme you already have applies.
+
+Nothing is ever written into the buffer by the plugin, so `u`, `.` and your
+LSP keep working exactly as they do in a normal python file.
+
+==============================================================================
+2. REQUIREMENTS                                           *jnvim-requirements*
+
+- Neovim 0.9 or newer
+- a Python interpreter with `jupyter_client` (and `ipykernel` for a Python
+  kernel): >
+
+    pip install jupyter_client ipykernel
+<
+Run `:checkhealth jnvim` to verify the setup.
+
+==============================================================================
+3. INSTALLATION                                           *jnvim-installation*
+
+lazy.nvim: >lua
+
+    { "jnvim.nvim", ft = "ipynb", opts = {} }
+<
+packer.nvim: >lua
+
+    use({ "jnvim.nvim", config = function() require("jnvim").setup({}) end })
+<
+Calling |jnvim.setup()| is optional; it only overrides defaults.
+
+==============================================================================
+4. BUFFER FORMAT                                                *jnvim-format*
+
+A notebook is shown as percent cells: >
+
+    # %%
+    import numpy as np
+    np.arange(5).sum()
+
+    # %% [markdown]
+    # ## Results
+    # the sum above is 10
+
+    # %% [raw]
+    # untouched text
+<
+Markdown and raw cells are commented out so the buffer stays valid source and
+your treesitter/LSP setup does not complain. The comment character follows the
+notebook language (`#`, `//`, `--`, `%`).
+
+Writing the buffer with `:w` converts it back to `.ipynb`, keeping cell ids,
+execution counts and outputs. Outputs follow their cell through edits because
+they are anchored with extmarks.
+
+Percent files that are not notebooks (a plain `.py`) can be used too: see
+|:Jnvim| `attach`.
+
+==============================================================================
+5. COMMANDS                                                   *jnvim-commands*
+
+                                                                      *:Jnvim*
+:Jnvim [subcommand] [args]      Default subcommand is `run`.
+
+    run                 run the cell under the cursor
+    run-all             run every cell
+    run-above           run all cells above the cursor
+    run-line            run the current line
+    start [kernel]      start (or switch) the kernel for this buffer
+    stop                shut the kernel down
+    restart             restart the kernel
+    interrupt           send KeyboardInterrupt
+    kernels             list installed kernelspecs
+    status              buffer, kernel and cell summary
+    attach              treat the current buffer as a notebook
+    open {file}         open a notebook
+    save [file]         write the notebook (same as `:w`)
+    clear               drop the output of the current cell
+    clear-all           drop every output
+    toggle-output       hide/show the output of the current cell
+    output-full         open the untruncated output in a split
+    inspect             kernel documentation for the symbol under the cursor
+    cell-below          insert a cell below and start inserting
+    cell-above          insert a cell above and start inserting
+    markdown            turn the current cell into a markdown cell
+    code                turn the current cell into a code cell
+    raw                 turn the current cell into a raw cell
+
+==============================================================================
+6. MAPPINGS                                                   *jnvim-mappings*
+
+Buffer-local, created for notebook buffers only. `<localleader>` defaults to
+`\` in Neovim; set |maplocalleader| to something comfortable.
+
+    <localleader>r      run the cell under the cursor
+    <localleader>R      run every cell
+    <localleader>a      run every cell above the cursor
+    <localleader>l      run the current line (visual: the selection)
+    ]c  [c              next / previous cell
+    <localleader>o  O   new cell below / above
+    <localleader>m      cell -> markdown
+    <localleader>y      cell -> code
+    <localleader>c  C   clear this output / every output
+    <localleader>i      interrupt the kernel
+    <localleader>x      restart the kernel
+    <localleader>t      toggle this cell's output
+    K                   kernel documentation in a floating window
+    ic  ac              text object: cell body / cell with its marker
+
+Set `keymaps.enabled = false` to define your own, or set any single entry to
+`""` to skip it.
+
+Completion from the live kernel is available through 'omnifunc' (|i_CTRL-X_CTRL-O|).
+
+==============================================================================
+7. CONFIGURATION                                                *jnvim-config*
+
+Defaults: >lua
+
+    require("jnvim").setup({
+      python = nil,          -- interpreter with jupyter_client
+      kernel = "python3",    -- fallback when the notebook names none
+      auto_start = true,     -- start a kernel when a notebook opens
+      auto_save_outputs = true,
+
+      output = {
+        enabled = true,
+        max_lines = 24,
+        prefix = "  ",
+        show_prompt = true,
+        running_text = "running...",
+      },
+
+      keymaps = {
+        enabled = true,
+        run = "<localleader>r",
+        run_all = "<localleader>R",
+        run_above = "<localleader>a",
+        run_line = "<localleader>l",
+        next_cell = "]c",
+        prev_cell = "[c",
+        cell_below = "<localleader>o",
+        cell_above = "<localleader>O",
+        cell_markdown = "<localleader>m",
+        cell_code = "<localleader>y",
+        clear = "<localleader>c",
+        clear_all = "<localleader>C",
+        interrupt = "<localleader>i",
+        restart = "<localleader>x",
+        inspect = "K",
+        toggle_output = "<localleader>t",
+        text_object = "ic",
+      },
+    })
+<
+Highlight groups (all linked by default, override freely):
+`JnvimOutput`, `JnvimError`, `JnvimPrompt`, `JnvimRunning`, `JnvimMore`.
+
+==============================================================================
+8. LUA API                                                         *jnvim-api*
+
+>lua
+    local jnvim = require("jnvim")
+
+    jnvim.setup(opts)
+    jnvim.run()            jnvim.run_all()      jnvim.run_above()
+    jnvim.run_line()       jnvim.attach(buf)
+    jnvim.start(buf, kernel)                    jnvim.stop(buf)
+    jnvim.restart(buf)     jnvim.interrupt(buf)
+    jnvim.kernels(cb)      jnvim.status(buf)  -- "python3:idle"
+<
+Statusline example: >lua
+
+    vim.o.statusline = "%f %= %{v:lua.require'jnvim'.status()}"
+<
+==============================================================================
+9. HOW IT WORKS                                              *jnvim-internals*
+
+The Lua side owns the buffer, the cells and the extmarks. A small Python
+process (`python/jnvim`) is started on demand and speaks one JSON object per
+line over stdin/stdout: requests from Neovim, kernel messages back. One kernel
+is started per notebook buffer.
+
+The bridge never prints anything except protocol frames, and the kernel's own
+stdout/stderr go to `/dev/null`, so a noisy kernel cannot corrupt the channel.
+
+ vim:tw=78:ts=8:ft=help:norl:

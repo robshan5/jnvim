@@ -1,5 +1,5 @@
-# Sync the project into a WSL distro (native FS) and optionally run a command.
-#   .\build\sync-wsl.ps1 -Distro OracleLinux_7_9 -Command "sh /root/jnvim/build/build-linux.sh"
+# Sync this plugin into a WSL distro and run a command there.
+#   .\scripts\sync-wsl.ps1 -Distro Ubuntu -Command "sh /root/jnvim/tests/run.sh"
 param(
     [string]$Distro = "Ubuntu",
     [string]$Dest = "/root/jnvim",
@@ -9,13 +9,16 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $unc = "\\wsl.localhost\$Distro" + ($Dest -replace "/", "\")
+$dirs = @("lua", "plugin", "python", "tests", "doc")
+# legacy layout from the old curses app, removed so it cannot shadow the plugin
+$stale = @("jnvim", "build", "dist")
 
-wsl -d $Distro -u root -- rm -rf "$Dest/jnvim" "$Dest/tests" "$Dest/build"
+wsl -d $Distro -u root -- rm -rf (($dirs + $stale) | ForEach-Object { "$Dest/$_" })
 New-Item -ItemType Directory -Force -Path $unc | Out-Null
-foreach ($dir in @("jnvim", "tests", "build")) {
-    Copy-Item -Recurse -Force (Join-Path $root $dir) (Join-Path $unc $dir)
+foreach ($dir in $dirs) {
+    $src = Join-Path $root $dir
+    if (Test-Path $src) { Copy-Item -Recurse -Force $src (Join-Path $unc $dir) }
 }
-# shell scripts must have LF endings inside the distro
 Get-ChildItem -Recurse -Path $unc -Filter *.sh | ForEach-Object {
     $text = (Get-Content $_.FullName -Raw) -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText($_.FullName, $text)
